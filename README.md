@@ -1,308 +1,82 @@
-# 🛠️ Edge AI for Bearing Fault Diagnosis
+# Bearing Fault Diagnosis — Edge-Deployable 1D-CNN
 
-> **Efficient bearing fault diagnosis using compact 1D-CNNs, structured pruning, INT8 quantization, cross-dataset generalization, and MMD-based domain adaptation.**
+Vibration-signal fault classification for rolling-element bearings, built for
+low-power edge deployment: a compact 1D-CNN trained on CWRU vibration data,
+compressed via structured pruning + INT8 post-training quantization, then
+stress-tested for cross-dataset generalization on the Paderborn (PU) bearing
+dataset.
 
-## 📌 Overview
+## Pipeline
 
-This project investigates **vibration-based bearing fault diagnosis using Deep Learning**, with a particular focus on **efficient deployment for Edge AI and TinyML applications**.
+The notebook (`notebooks/bearing_fault_diagnosis.ipynb`) runs end to end:
 
-The project goes beyond achieving high classification accuracy on a single dataset. It investigates the complete machine learning pipeline, including:
+1. **Signal extraction & windowing** — pulls the `*_DE_time` channel from CWRU
+   `.mat` files, slices into fixed-length windows, labels by fault type.
+2. **Train/test split & normalization** — stratified group split (by source
+   file) to avoid leakage between windows of the same recording.
+3. **Baseline 1D-CNN** — small-on-purpose reference model.
+4. **TFLite conversion & evaluation** — FP16 and INT8 post-training
+   quantization, each re-evaluated against the FP32 baseline.
+5. **Structured filter pruning** — coarse then fine-grained search over
+   filter-keep ratios, with fine-tuning after each prune.
+6. **Latency & footprint benchmarking** — per-sample inference latency and
+   memory footprint across all variants, collated into a final comparison
+   table (size / accuracy / macro-F1).
+7. **Deployment export** — writes the chosen INT8 `.tflite` model plus
+   `model_metadata.json` (class labels, window size, input/output
+   quantization scale & zero-point) to `deployment/`.
+8. **Best-candidate quantization** — INT8 quantization of the selected pruned
+   model (`Pruned_50pct`).
+9. **Taylor-expansion pruning ablation** — compares first-order Taylor filter
+   importance (Molchanov et al.) against the L2-norm baseline used earlier.
+10. **Cross-dataset generalization** — same pipeline applied to the Paderborn
+    PU dataset to check how well the CWRU-trained model transfers.
+11. **Domain-shift fixes** — global (dataset-level) normalization, Hilbert
+    envelope demodulation, and MMD-based domain adaptation, with a
+    lambda=0 control run to isolate what's actually helping.
+12. **Interactive demo** — inline `ipywidgets` UI to run inference on either
+    an uploaded CWRU `.mat` file or a synthetic illustrative signal.
 
-* Leakage-aware data splitting
-* Compact 1D-CNN design
-* Structured neural network pruning
-* L2 vs. Taylor filter importance comparison
-* FP16 and INT8 quantization
-* Accuracy–size trade-offs for Edge deployment
-* Cross-dataset generalization
-* Domain shift analysis
-* MMD-based unsupervised domain adaptation
+## Repo structure
 
-The goal is to develop models that are not only accurate but also **compact, efficient, and critically evaluated for real-world generalization**.
-
----
-
-# 🎯 Objectives
-
-The main objectives of this project are:
-
-1. Develop a compact 1D-CNN for bearing fault diagnosis from vibration signals.
-2. Prevent data leakage using file-level grouped data splitting.
-3. Reduce model complexity using structured filter pruning.
-4. Compare L2 magnitude-based and Taylor-based pruning strategies.
-5. Apply FP16 and INT8 quantization for efficient deployment.
-6. Identify optimal accuracy–compression trade-offs.
-7. Evaluate model generalization across different bearing datasets.
-8. Investigate domain shift and dataset-specific shortcut features.
-9. Explore MMD-based domain adaptation for cross-domain transfer.
-
----
-
-# 📊 Datasets
-
-The project investigates bearing fault diagnosis and cross-dataset transfer using:
-
-* **CWRU — Case Western Reserve University Bearing Dataset**
-* **Paderborn University Bearing Dataset**
-
-The fault diagnosis task includes bearing conditions such as:
-
-* 🟢 Normal
-* 🔵 Ball Fault
-* 🟠 Inner Race Fault
-* 🔴 Outer Race Fault
-
----
-
-# 🧠 Model Architecture
-
-A compact **1D Convolutional Neural Network (1D-CNN)** is used to process raw vibration signals.
-
-The architecture consists of:
-
-```text
-Input Vibration Signal
-        ↓
-Conv1D + Batch Normalization + MaxPooling
-        ↓
-Conv1D + Batch Normalization + MaxPooling
-        ↓
-Conv1D
-        ↓
-Global Average Pooling
-        ↓
-Dense + Dropout
-        ↓
-Softmax Classification
+```
+bearing-fault-diagnosis/
+├── README.md
+├── requirements.txt
+├── .gitignore
+├── notebooks/
+│   └── bearing_fault_diagnosis.ipynb   # full pipeline, steps 1–12
+├── demo/
+│   └── ipywidgets_demo.py              # standalone copy of the notebook's demo cell
+└── deployment/                         # populated by Step 7 (not committed — see .gitignore)
+    ├── <variant>.tflite
+    └── model_metadata.json
 ```
 
-The architecture was designed with efficiency in mind, making it suitable for later optimization and deployment on resource-constrained devices.
+## Requirements
 
----
-
-# 🔒 Leakage-Aware Evaluation
-
-A major focus of this project is preventing **data leakage**.
-
-Instead of randomly splitting individual signal windows, the dataset is split at the **source-file level**.
-
-This ensures that windows originating from the same vibration recording cannot appear simultaneously in training and testing datasets.
-
-```text
-Source Files
-     ↓
-Grouped File-Level Split
-     ↓
-Training Files       Test Files
-     ↓                   ↓
-Signal Windows      Signal Windows
+```bash
+pip install -r requirements.txt
 ```
 
-This provides a more reliable evaluation than a random window-level split.
+Datasets (not included — download separately):
+- [CWRU Bearing Data Center](https://engineering.case.edu/bearingdatacenter)
+- [Paderborn University bearing dataset](https://mb.uni-paderborn.de/kat/forschung/kat-datacenter/bearing-datacenter)
+
+## Running the demo
+
+The demo cell (Step 12) reuses the model already loaded in memory from Step 7
+(`DEPLOY_MODEL_BYTES`, `metadata`) — no file I/O needed if you're running the
+full notebook top to bottom. To run it standalone in another notebook, load
+those two objects yourself (from `deployment/`) and paste in
+`demo/ipywidgets_demo.py`.
+
+## Notes
+
+- The synthetic-signal mode in the demo generates illustrative
+  fault-patterned signals (periodic impulses at approximate fault
+  frequencies) for exploring the model without a real `.mat` file on hand —
+  it is not real bearing data and shouldn't be used to judge real-world
+  accuracy.
+- Some notebook comments are in French.
 
----
-
-# ✂️ Structured Pruning
-
-To reduce model complexity, this project implements **structured filter pruning**.
-
-Unlike unstructured pruning, structured pruning removes complete convolutional filters, resulting in a physically smaller neural network.
-
-Two filter importance criteria are investigated:
-
-## L2 Magnitude-Based Pruning
-
-Filters with smaller L2 norms are considered less important and can be removed.
-
-## Taylor-Based Pruning
-
-Filter importance is estimated using a first-order Taylor approximation of the effect of removing a feature.
-
-The methods are compared under matched pruning ratios.
-
----
-
-# ⚡ Quantization
-
-The optimized models are converted to TensorFlow Lite and evaluated using:
-
-* FP32
-* FP16
-* INT8
-
-INT8 quantization is particularly relevant for embedded and Edge AI deployment.
-
----
-
-# 🏆 Best Compression Result
-
-The strongest Edge AI candidate obtained in the original compression experiments is:
-
-| Metric         |            Result |
-| -------------- | ----------------: |
-| Model          | Pruned 50% + INT8 |
-| Accuracy       |        **97.03%** |
-| Macro-F1       |        **0.9743** |
-| Model Size     |       **17.1 KB** |
-| Size Reduction |          **~76%** |
-
-This demonstrates that significant model compression can be achieved while maintaining strong intra-dataset classification performance.
-
----
-
-# 📈 Compression Pipeline
-
-```text
-FP32 Compact CNN
-        ↓
-Structured Filter Pruning
-        ↓
-Model Reconstruction
-        ↓
-Fine-Tuning
-        ↓
-FP16 / INT8 Quantization
-        ↓
-TensorFlow Lite Model
-        ↓
-Edge AI Deployment Candidate
-```
-
----
-
-# 🌍 Cross-Dataset Generalization
-
-High accuracy on a single dataset does not necessarily imply robust real-world generalization.
-
-This project therefore evaluates cross-dataset transfer between:
-
-```text
-CWRU  →  Paderborn
-
-Paderborn  →  CWRU
-```
-
-The experiments reveal significant domain shift between the two datasets.
-
-The model performs strongly within its original dataset but experiences substantial degradation when transferred to a different experimental domain.
-
-This highlights the limitations of evaluating bearing diagnosis systems exclusively using intra-dataset accuracy.
-
----
-
-# 🔬 Shortcut Feature Investigation
-
-The cross-dataset experiments suggest that the model may partially rely on **dataset-specific characteristics**, such as signal amplitude or energy distributions.
-
-This raises an important research question:
-
-> Is the model learning universal physical signatures of bearing faults, or is it exploiting dataset-specific shortcuts?
-
-The project investigates this question through cross-dataset analysis and domain adaptation experiments.
-
----
-
-# 🌐 MMD-Based Domain Adaptation
-
-To reduce the distribution gap between source and target domains, the project explores **Maximum Mean Discrepancy (MMD)** based domain adaptation.
-
-The training objective is:
-
-$$
-L = L_{classification} + \lambda_{MMD}L_{MMD}
-$$
-
-where:
-
-* \(L_{classification}\) represents source-domain classification loss.
-* \(L_{MMD}\) measures the discrepancy between source and target feature distributions.
-* \(\lambda_{MMD}\) controls the importance of domain alignment.
-
-A source-only control experiment is performed using:
-
-```text
-λ_MMD = 0
-```
-
-and compared against MMD-based adaptation.
-
-Current experiments show that domain alignment must be carefully tuned and that MMD-based feature alignment does not automatically guarantee improved target-domain classification.
-
----
-
-# 🧪 Experimental Research Pipeline
-
-```text
-High Intra-Dataset Accuracy
-            ↓
-Structured Pruning
-            ↓
-INT8 Quantization
-            ↓
-Compact Edge AI Model
-            ↓
-Cross-Dataset Evaluation
-            ↓
-Generalization Failure
-            ↓
-Domain Shift Investigation
-            ↓
-Shortcut Feature Hypothesis
-            ↓
-MMD Domain Adaptation
-            ↓
-Control Experiment
-            ↓
-Systematic λ Evaluation
-```
-
----
-
-
-
-
-# 🚀 Key Takeaways
-
-This project demonstrates that:
-
-* High intra-dataset accuracy does not guarantee cross-dataset generalization.
-* Compact neural networks can achieve strong performance for bearing fault diagnosis.
-* Structured pruning and INT8 quantization can significantly reduce model size.
-* L2 and Taylor pruning strategies can behave differently depending on the architecture and experimental configuration.
-* Domain shift remains a major challenge in vibration-based fault diagnosis.
-* Simple feature alignment using MMD may not be sufficient to overcome significant cross-domain differences.
-
----
-
-# 🔮 Future Work
-
-Future research directions include:
-
-* Systematic MMD hyperparameter optimization.
-* Multiple random seed experiments and statistical reporting.
-* Improved domain adaptation techniques.
-* Class-conditional domain alignment.
-* Feature normalization strategies.
-* Domain-adversarial learning.
-* Real microcontroller deployment and benchmarking.
-* Flash, RAM, latency, and energy measurements on embedded hardware.
-
----
-
-# 🛠️ Technologies
-
-* Python
-* TensorFlow / Keras
-* TensorFlow Lite
-* NumPy
-* Scikit-learn
-* Structured Neural Network Pruning
-* INT8 Quantization
-* Domain Adaptation
-* Maximum Mean Discrepancy (MMD)
-
----
-
-# 📄 Research Focus
-
-**Edge AI · TinyML · Deep Learning · Condition Monitoring · Predictive Maintenance · Time-Series Classification · Model Compression · Domain Adaptation**
